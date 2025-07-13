@@ -7,7 +7,7 @@
 set -e
 
 AWS_REGION="us-east-1"
-STACK_NAME="sam-sample-pytest"
+STACK_NAME="sam-sample-wikipedia-scraper"
 
 # Colors for better learning experience
 GREEN='\033[0;32m'
