@@ -30,16 +30,38 @@ class TestApiGateway:
 
         stacks = response["Stacks"]
         stack_outputs = stacks[0]["Outputs"]
-        api_outputs = [output for output in stack_outputs if output["OutputKey"] == "HelloWorldApi"]
+        api_outputs = [output for output in stack_outputs if output["OutputKey"] == "WikipediaTocApi"]
 
         if not api_outputs:
-            raise KeyError(f"HelloWorldAPI not found in stack {stack_name}")
+            raise KeyError(f"WikipediaTocApi not found in stack {stack_name}")
 
         return api_outputs[0]["OutputValue"]  # Extract url from stack outputs
 
-    def test_api_gateway(self, api_gateway_url):
-        """ Call the API Gateway endpoint and check the response """
-        response = requests.get(api_gateway_url)
+    def test_api_gateway_valid_url(self, api_gateway_url):
+        """ Call the API Gateway endpoint with valid Wikipedia URL """
+        test_url = "https://ja.wikipedia.org/wiki/Amazon_Web_Services"
+        response = requests.get(f"{api_gateway_url}?url={test_url}")
 
         assert response.status_code == 200
-        assert response.json() == {"message": "hello world"}
+        data = response.json()
+        assert data["success"] is True
+        assert data["url"] == test_url
+
+    def test_api_gateway_invalid_url(self, api_gateway_url):
+        """ Call the API Gateway endpoint with invalid URL """
+        test_url = "https://example.com/test"
+        response = requests.get(f"{api_gateway_url}?url={test_url}")
+
+        assert response.status_code == 400
+        data = response.json()
+        assert data["success"] is False
+        assert "Invalid Wikipedia URL" in data["error"]
+
+    def test_api_gateway_no_url(self, api_gateway_url):
+        """ Call the API Gateway endpoint without URL parameter """
+        response = requests.get(api_gateway_url)
+
+        assert response.status_code == 400
+        data = response.json()
+        assert data["success"] is False
+        assert "URL parameter is required" in data["error"]
