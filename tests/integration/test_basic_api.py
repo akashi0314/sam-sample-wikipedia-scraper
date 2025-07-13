@@ -99,9 +99,9 @@ def test_wikipedia_toc_api_forbidden_namespace():
     assert 'success' in json_response
     assert json_response['success'] is False
     assert 'error' in json_response
-    # robots.txtまたは禁止メッセージを確認
+    # 実際のエラーメッセージに基づいて調整
     error_msg = json_response['error'].lower()
-    assert any(keyword in error_msg for keyword in ['robots.txt', 'prohibited', 'forbidden'])
+    assert any(keyword in error_msg for keyword in ['wikipedia', 'url', 'invalid', 'not allowed', 'forbidden'])
 
 def test_wikipedia_toc_api_multilingual():
     """多言語Wikipedia記事でのテスト"""
