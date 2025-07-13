@@ -1,6 +1,5 @@
-pytest
-boto3
 requests
 beautifulsoup4
+urllib3
 lxml
-responses
+user-agents
