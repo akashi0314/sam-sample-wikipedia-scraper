@@ -1,21 +1,31 @@
+#!/usr/bin/env python3
+"""
+統合版Wikipedia目次抽出プログラム
+指定されたWikipediaページから目次を抽出して表示します。
+robots.txt遵守とレート制限を含む。
+"""
+
 import json
 import re
 import time
-from urllib.parse import urlparse, parse_qs
+import sys
+from urllib.parse import urlparse, unquote
 import requests
 from bs4 import BeautifulSoup
+
 
 # robots.txt遵守のためのUser-Agent設定
 HEADERS = {
     'User-Agent': 'Educational-TOC-Scraper/1.0 (Contact: educational.purpose@example.com)',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.5',
+    'Accept-Language': 'ja,en-US,en;q=0.9',  # 日本語を優先
     'Accept-Encoding': 'gzip, deflate',
     'Connection': 'keep-alive'
 }
 
 # レート制限のための最小待機時間（秒）
 MIN_REQUEST_INTERVAL = 1.0
+
 
 def validate_wikipedia_url(url):
     """
@@ -68,71 +78,21 @@ def validate_wikipedia_url(url):
     if parsed.path.startswith('/trap/'):
         return False, "Access to /trap/ paths is prohibited by robots.txt"
     
-    # Extract article name
-    article_name = parsed.path[6:]  # Remove '/wiki/' prefix
+    # Extract article name and decode URL encoding
+    article_name = unquote(parsed.path[6:])  # Remove '/wiki/' prefix and decode
     
     if not article_name:
         return False, "Article name is required"
     
     # Check for forbidden paths (robots.txt compliance)
-    # 基本的な禁止パターン
-    basic_forbidden_patterns = [
-        r'^Special:',           # Special pages - robots.txt明示的禁止
-        r'^Spezial:',          # Special pages (German)
-        r'^Spesial:',          # Special pages (Norwegian)
-        r'^Special%3A',        # URL encoded Special:
-        r'^Spezial%3A',        # URL encoded Spezial:
-        r'^Spesial%3A',        # URL encoded Spesial:
+    forbidden_patterns = [
+        r'^Special:',           # Special pages
         r'^特別:',              # Special pages (Japanese)
-        r'^%E7%89%B9%E5%88%A5:', # URL encoded 特別:
-        r'^%E7%89%B9%E5%88%A5%3A:', # URL encoded 特別%3A:
-    ]
-    
-    # 利用者/ユーザーページ関連
-    user_forbidden_patterns = [
-        r'^User:',              # User pages (English)  
-        r'^User%3A',            # URL encoded User:
-        r'^User_talk:',         # User talk pages (English)
-        r'^User_talk%3A',       # URL encoded User_talk:
+        r'^User:',              # User pages
         r'^利用者:',            # User pages (Japanese)
-        r'^%E5%88%A9%E7%94%A8%E8%80%85:', # URL encoded 利用者:
-        r'^%E5%88%A9%E7%94%A8%E8%80%85%3A', # URL encoded 利用者%3A
+        r'^User_talk:',         # User talk pages
         r'^利用者‐会話:',       # User talk pages (Japanese)
-        r'^%E5%88%A9%E7%94%A8%E8%80%85%E2%80%90%E4%BC%9A%E8%A9%B1:', # URL encoded
-        r'^%E5%88%A9%E7%94%A8%E8%80%85%E2%80%90%E4%BC%9A%E8%A9%B1%3A', # URL encoded
-    ]
-    
-    # Wikipedia名前空間とショートカット
-    wikipedia_namespace_patterns = [
         r'^Wikipedia:',         # Wikipedia namespace
-        r'^Wikipedia%3A',       # URL encoded Wikipedia:
-        r'^WP:',               # Wikipedia shortcut (Japanese)
-        r'^WP%3A',             # URL encoded WP:
-        r'^ノート:WP',          # Wikipedia talk shortcut
-        r'^%E3%83%8E%E3%83%BC%E3%83%88:WP:', # URL encoded
-        r'^%E3%83%8E%E3%83%BC%E3%83%88%3AWP%3A', # URL encoded
-        r'^LTA:',              # Long Term Abuse
-        r'^LTA%3A',            # URL encoded LTA:
-    ]
-    
-    # 削除依頼関連（日本語Wikipedia特有）
-    deletion_patterns = [
-        r'^削除依頼',           # 削除依頼 shortcut
-        r'^%E5%89%8A%E9%99%A4%E4%BE%9D%E9%A0%BC', # URL encoded
-        r'^削除の復帰依頼',      # 削除の復帰依頼 shortcut
-        r'^%E5%89%8A%E9%99%A4%E3%81%AE%E5%BE%A9%E5%B8%B0%E4%BE%9D%E9%A0%BC', # URL encoded
-        r'^復帰依頼',           # 復帰依頼 shortcut
-        r'^%E5%BE%A9%E5%B8%B0%E4%BE%9D%E9%A0%BC', # URL encoded
-        r'^ブロック依頼',        # ブロック依頼 shortcut
-        r'^%E3%83%96%E3%83%AD%E3%83%83%E3%82%AF%E4%BE%9D%E9%A0%BC', # URL encoded
-        r'^投稿ブロック依頼',     # 投稿ブロック依頼 shortcut
-        r'^%E6%8A%95%E7%A8%BF%E3%83%96%E3%83%AD%E3%83%83%E3%82%AF%E4%BE%9D%E9%A0%BC', # URL encoded
-        r'^管理者伝言板',        # 管理者伝言板 shortcut
-        r'^%E7%AE%A1%E7%90%86%E8%80%85%E4%BC%9D%E8%A8%80%E6%9D%BF', # URL encoded
-    ]
-    
-    # その他の禁止パターン
-    other_forbidden_patterns = [
         r'^ノート:',            # Talk pages (Japanese)
         r'^Talk:',              # Talk pages (English)
         r'^ファイル:',          # File pages (Japanese)
@@ -150,28 +110,82 @@ def validate_wikipedia_url(url):
         r'^Project:',           # Project pages
     ]
     
-    # 全ての禁止パターンを統合
-    all_forbidden_patterns = (
-        basic_forbidden_patterns + 
-        user_forbidden_patterns + 
-        wikipedia_namespace_patterns + 
-        deletion_patterns + 
-        other_forbidden_patterns
-    )
-    
-    for pattern in all_forbidden_patterns:
+    for pattern in forbidden_patterns:
         if re.match(pattern, article_name, re.IGNORECASE):
-            pattern_name = pattern.replace('^', '').replace(':', '').replace('%3A', '').replace('%E', '').replace('%', '')
+            pattern_name = pattern.replace('^', '').replace(':', '')
             return False, f"Access to {pattern_name} pages is prohibited by Wikipedia's robots.txt"
     
     return True, ""
 
-def scrape_wikipedia_toc(url):
+
+def get_heading_level_from_tag(tag):
+    """
+    HTMLタグから見出しレベルを取得する
+    
+    Args:
+        tag: BeautifulSoupのタグオブジェクト
+        
+    Returns:
+        int: 見出しレベル (1-6)
+    """
+    if tag.name in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
+        return int(tag.name[1])
+    return 1
+
+
+def get_heading_level_from_toc_item(link):
+    """
+    目次アイテムから階層レベルを取得する
+    
+    Args:
+        link: BeautifulSoupのリンク要素
+        
+    Returns:
+        int: 階層レベル（1-6）
+    """
+    # 親要素を辿ってレベルを判定
+    parent_li = link.find_parent('li')
+    if parent_li:
+        # class名からレベルを推定 (toclevel-1, toclevel-2, など)
+        class_names = parent_li.get('class', [])
+        for class_name in class_names:
+            if class_name.startswith('toclevel-'):
+                try:
+                    level = int(class_name.split('-')[1])
+                    return level
+                except (IndexError, ValueError):
+                    pass
+    
+    # フォールバック: ul要素のネストレベルをカウント
+    current = link
+    level_found = 1
+    
+    for i in range(5):  # 最大5階層上まで検索
+        current = current.parent
+        if not current:
+            break
+            
+        if current.name == 'ul':
+            # ul要素のネストレベルをカウント
+            ul_count = 0
+            temp = current
+            while temp:
+                temp = temp.find_parent('ul')
+                if temp:
+                    ul_count += 1
+            level_found = ul_count + 1
+            break
+    
+    return level_found
+
+
+def scrape_wikipedia_toc(url, debug=False):
     """
     Wikipedia記事の目次情報を取得する（robots.txt遵守）
     
     Args:
         url (str): Wikipedia article URL
+        debug (bool): デバッグ情報を出力するかどうか
         
     Returns:
         dict: TOC information or error
@@ -181,54 +195,95 @@ def scrape_wikipedia_toc(url):
         time.sleep(MIN_REQUEST_INTERVAL)
         
         # robots.txt準拠のUser-Agentでリクエスト
-        response = requests.get(url, headers=HEADERS, timeout=10)
+        response = requests.get(url, headers=HEADERS, timeout=15)
         response.raise_for_status()
+        
+        # 文字エンコーディングを適切に設定
+        if response.encoding is None or response.encoding == 'ISO-8859-1':
+            response.encoding = 'utf-8'
         
         # HTMLをパース
         soup = BeautifulSoup(response.content, 'lxml')
         
         # ページタイトルを取得
         title_elem = soup.find('h1', {'class': 'firstHeading'})
+        if not title_elem:
+            title_elem = soup.find('h1', {'id': 'firstHeading'})
         title = title_elem.get_text().strip() if title_elem else "Unknown"
         
-        # 目次要素を取得
-        toc_elem = soup.find('div', {'id': 'toc'})
-        if not toc_elem:
-            return {
-                "success": True,
-                "url": url,
-                "title": title,
-                "toc": [],
-                "message": "No table of contents found on this page"
-            }
-        
-        # 目次項目を解析
+        # 目次を取得
         toc_items = []
-        toc_links = toc_elem.find_all('a')
         
-        for link in toc_links:
-            href = link.get('href', '')
-            if href.startswith('#'):
-                # レベルを親要素から判定
-                parent_li = link.find_parent('li')
-                if parent_li:
-                    # class名からレベルを推定 (toclevel-1, toclevel-2, など)
-                    class_names = parent_li.get('class', [])
-                    level = 1
-                    for class_name in class_names:
-                        if class_name.startswith('toclevel-'):
-                            try:
-                                level = int(class_name.split('-')[1])
-                            except (IndexError, ValueError):
-                                level = 1
-                            break
+        # 標準的な目次テーブルから取得
+        toc_elem = soup.find('div', {'id': 'toc'})
+        
+        if toc_elem:
+            toc_links = toc_elem.find_all('a')
+            
+            for link in toc_links:
+                href = link.get('href', '')
+                
+                if href.startswith('#'):
+                    level = get_heading_level_from_toc_item(link)
                     
-                    toc_items.append({
+                    # テキスト抽出
+                    text_elem = link.find('span', class_='toctext')
+                    if text_elem:
+                        text = text_elem.get_text(strip=True)
+                    else:
+                        text = link.get_text(strip=True)
+                    
+                    # 先頭の数字とドットを除去 (例: "1.2.3 タイトル" -> "タイトル")
+                    text = re.sub(r'^\d+(\.\d+)*\s*', '', text)
+                    
+                    # 不要な空白を清理し、余分なスペースを除去
+                    text = re.sub(r'\s+', ' ', text).strip()
+                    
+                    # 目次自体の項目を除外
+                    if text.lower() in ['目次', 'contents', 'table of contents'] or not text:
+                        continue
+                    
+                    # アンカーの清理
+                    anchor = href[1:]  # '#'を除去
+                    
+                    item = {
                         "level": level,
-                        "title": link.get_text().strip(),
-                        "anchor": href[1:],  # '#'を除去
+                        "title": text,
+                        "anchor": anchor,
                         "href": href
-                    })
+                    }
+                    toc_items.append(item)
+        
+        # 目次が見つからない場合、見出しタグから直接取得
+        if not toc_items:
+            headings = soup.find_all(['h2', 'h3', 'h4', 'h5', 'h6'])
+            
+            for heading in headings:
+                # 編集リンクを除外
+                edit_links = heading.find_all('span', {'class': 'mw-editsection'})
+                for edit_link in edit_links:
+                    edit_link.decompose()
+                
+                # テキスト抽出と清理
+                text = heading.get_text(strip=True)
+                text = re.sub(r'\s+', ' ', text)  # 複数の空白を単一のスペースに
+                
+                if text and not text.startswith('[編集]') and text.lower() not in ['目次', 'contents']:
+                    # IDからアンカーを生成
+                    anchor_id = heading.get('id', '')
+                    if not anchor_id:
+                        # IDがない場合、テキストからアンカーを生成
+                        anchor_id = re.sub(r'[^\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]', '_', text)
+                    
+                    level = get_heading_level_from_tag(heading)
+                    
+                    item = {
+                        "level": level,
+                        "title": text,
+                        "anchor": anchor_id,
+                        "href": f"#{anchor_id}"
+                    }
+                    toc_items.append(item)
         
         return {
             "success": True,
@@ -238,6 +293,12 @@ def scrape_wikipedia_toc(url):
             "total_items": len(toc_items)
         }
         
+    except requests.exceptions.Timeout:
+        return {
+            "success": False,
+            "error": "Request timeout",
+            "message": "Wikipedia page took too long to respond"
+        }
     except requests.exceptions.RequestException as e:
         return {
             "success": False,
@@ -251,13 +312,176 @@ def scrape_wikipedia_toc(url):
             "message": str(e)
         }
 
+
+def print_toc_simple(toc_items):
+    """
+    目次をシンプルに表示する
+    
+    Args:
+        toc_items (list): 目次項目のリスト
+    """
+    if not toc_items:
+        print("目次が見つかりませんでした。")
+        return
+    
+    print("=" * 60)
+    print("目次")
+    print("=" * 60)
+    
+    for item in toc_items:
+        # インデントを階層レベルに応じて調整
+        indent = "  " * (item['level'] - 1)
+        title = item['title']
+        print(f"{indent}• {title}")
+    
+    print("=" * 60)
+
+
+def print_toc_detailed(toc_items):
+    """
+    目次を詳細表示する（レベル、アンカー付き）
+    
+    Args:
+        toc_items (list): 目次項目のリスト
+    """
+    if not toc_items:
+        print("目次が見つかりませんでした。")
+        return
+    
+    print("=" * 80)
+    print("目次（詳細表示）")
+    print("=" * 80)
+    
+    for i, item in enumerate(toc_items, 1):
+        indent = "  " * (item['level'] - 1)
+        title = item['title']
+        level = item['level']
+        href = item['href']
+        
+        print(f"{i:2d}. {indent}[H{level}] {title}")
+        print(f"     {indent}    -> {href}")
+        if i < len(toc_items):
+            print()
+    
+    print("=" * 80)
+
+
+def export_to_json(result, filename=None):
+    """
+    結果をJSONファイルに出力する
+    
+    Args:
+        result (dict): 抽出結果
+        filename (str): 出力ファイル名
+    """
+    if not filename:
+        # URLからファイル名を生成
+        if result.get('success') and result.get('url'):
+            parsed = urlparse(result['url'])
+            article_name = unquote(parsed.path[6:])  # Remove '/wiki/' prefix
+            filename = f"{article_name}_toc.json"
+        else:
+            filename = "wikipedia_toc.json"
+    
+    try:
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        print(f"\n結果を {filename} に保存しました。")
+    except Exception as e:
+        print(f"\nJSONファイル保存エラー: {e}")
+
+
+def main():
+    """メイン関数"""
+    print("Wikipedia目次抽出プログラム")
+    print("=" * 50)
+    
+    # デフォルトURL
+    default_url = "https://ja.wikipedia.org/wiki/Amazon_Web_Services"
+    
+    # コマンドライン引数があれば使用
+    if len(sys.argv) > 1:
+        url = sys.argv[1]
+    else:
+        # インタラクティブモード
+        url = input(f"Wikipedia URL (デフォルト: AWS): ").strip()
+        if not url:
+            url = default_url
+    
+    print(f"\nURL: {url}")
+    
+    # URL検証
+    is_valid, error_message = validate_wikipedia_url(url)
+    if not is_valid:
+        print(f"エラー: {error_message}")
+        return
+    
+    print("✓ URL検証完了")
+    print("目次を抽出中...")
+    
+    # 目次を抽出（デバッグモード有効）
+    result = scrape_wikipedia_toc(url, debug=True)
+    
+    if not result['success']:
+        print(f"エラー: {result['error']}")
+        print(f"詳細: {result['message']}")
+        return
+    
+    # 結果を表示
+    print(f"\n✓ 抽出完了")
+    print(f"ページタイトル: {result['title']}")
+    print(f"目次項目数: {result['total_items']}")
+    
+    if result['toc']:
+        # シンプル表示
+        print_toc_simple(result['toc'])
+        
+        # 詳細表示オプション
+        while True:
+            choice = input("\n表示オプションを選択してください:\n"
+                          "1. 詳細表示 (レベル・アンカー付き)\n"
+                          "2. JSON出力\n"
+                          "3. 終了\n"
+                          "選択 (1-3): ").strip()
+            
+            if choice == '1':
+                print_toc_detailed(result['toc'])
+            elif choice == '2':
+                filename = input("出力ファイル名 (空白でデフォルト): ").strip()
+                if not filename:
+                    filename = None
+                export_to_json(result, filename)
+            elif choice == '3':
+                break
+            else:
+                print("1, 2, または3を入力してください。")
+    else:
+        print("目次が見つかりませんでした。")
+
+
 def lambda_handler(event, context):
     """
     Lambda function to validate Wikipedia URLs and return TOC information.
-    robots.txt遵守を重視した実装
+    シンプルな教育用API実装
     """
     
     try:
+        # HTTPメソッドのチェック
+        http_method = event.get('httpMethod', 'GET')
+        if http_method != 'GET':
+            return {
+                "statusCode": 405,
+                "headers": {
+                    "Content-Type": "application/json",
+                    "Access-Control-Allow-Origin": "*"
+                },
+                "body": json.dumps({
+                    "success": False,
+                    "error": "Method not allowed",
+                    "message": "Only GET method is supported"
+                })
+            }
+        
         # Get URL from query parameters
         query_params = event.get('queryStringParameters') or {}
         url = query_params.get('url')
@@ -266,63 +490,67 @@ def lambda_handler(event, context):
             return {
                 "statusCode": 400,
                 "headers": {
-                    "Content-Type": "application/json",
+                    "Content-Type": "application/json; charset=utf-8",
                     "Access-Control-Allow-Origin": "*"
                 },
                 "body": json.dumps({
                     "success": False,
                     "error": "URL parameter is required",
                     "message": "Please provide a Wikipedia URL using ?url=<wikipedia_url>",
-                    "robots_compliance": "This service respects Wikipedia's robots.txt"
-                })
+                    "example": "?url=https://ja.wikipedia.org/wiki/Amazon_Web_Services"
+                }, ensure_ascii=False)
             }
         
-        # Validate Wikipedia URL (robots.txt compliance check)
+        # Validate Wikipedia URL
         is_valid, error_message = validate_wikipedia_url(url)
         
         if not is_valid:
             return {
                 "statusCode": 400,
                 "headers": {
-                    "Content-Type": "application/json",
+                    "Content-Type": "application/json; charset=utf-8",
                     "Access-Control-Allow-Origin": "*"
                 },
                 "body": json.dumps({
                     "success": False,
-                    "error": "Invalid Wikipedia URL or robots.txt violation",
+                    "error": "Invalid Wikipedia URL",
                     "message": error_message,
-                    "provided_url": url,
-                    "robots_compliance": "This service respects Wikipedia's robots.txt"
-                })
+                    "provided_url": url
+                }, ensure_ascii=False)
             }
         
         # Scrape TOC information
-        result = scrape_wikipedia_toc(url)
+        result = scrape_wikipedia_toc(url, debug=False)  # 本番環境ではデバッグ無効
+        
+        # ステータスコードの決定
+        status_code = 200 if result["success"] else 500
+        if not result["success"] and "timeout" in result.get("error", "").lower():
+            status_code = 504
         
         return {
-            "statusCode": 200 if result["success"] else 400,
+            "statusCode": status_code,
             "headers": {
-                "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": "*"
+                "Content-Type": "application/json; charset=utf-8",
+                "Access-Control-Allow-Origin": "*",
+                "Cache-Control": "public, max-age=300"  # 5分間キャッシュ
             },
-            "body": json.dumps({
-                **result,
-                "robots_compliance": "This service respects Wikipedia's robots.txt",
-                "user_agent": HEADERS['User-Agent']
-            })
+            "body": json.dumps(result, ensure_ascii=False)
         }
         
     except Exception as e:
         return {
             "statusCode": 500,
             "headers": {
-                "Content-Type": "application/json",
+                "Content-Type": "application/json; charset=utf-8",
                 "Access-Control-Allow-Origin": "*"
             },
             "body": json.dumps({
                 "success": False,
                 "error": "Internal server error",
-                "message": str(e),
-                "robots_compliance": "This service respects Wikipedia's robots.txt"
-            })
+                "message": str(e)
+            }, ensure_ascii=False)
         }
+
+
+if __name__ == "__main__":
+    main()

@@ -48,11 +48,28 @@ curl "https://your-api-gateway-url/toc?url=https://ja.wikipedia.org/wiki/Amazon_
       "href": "#Amazon_EC2"
     }
   ],
-  "total_items": 3,
-  "robots_compliance": "This service respects Wikipedia's robots.txt",
-  "user_agent": "Educational-TOC-Scraper/1.0 (Contact: educational.purpose@example.com)"
+  "total_items": 3
 }
 ```
+
+### レスポンスヘッダー
+
+| ヘッダー | 値 | 説明 |
+|---------|---|------|
+| **Content-Type** | `application/json; charset=utf-8` | JSON形式、UTF-8エンコーディング |
+| **Access-Control-Allow-Origin** | `*` | CORS対応 |
+| **Cache-Control** | `public, max-age=300` | 5分間キャッシュ |
+
+### robots.txt遵守について
+
+本APIは以下の方法でWikipediaのrobots.txtを厳格に遵守しています：
+
+| 遵守項目 | 実装内容 |
+|---------|---------|
+| **User-Agent** | `Educational-TOC-Scraper/1.0 (Contact: educational.purpose@example.com)` |
+| **レート制限** | 最小1秒間隔でのリクエスト |
+| **禁止パス検証** | `/w/`, `/api/`, `/trap/`パスの完全ブロック |
+| **名前空間制限** | Special:, User:, Talk:等の管理ページアクセス禁止 |
 
 ## セットアップ
 
@@ -142,8 +159,21 @@ sam-sample-wikipedia-scraper/
 |------|--------|------|
 | **最小待機時間** | 1.0秒 | サーバー負荷軽減 |
 | **User-Agent** | `Educational-TOC-Scraper/1.0` | 識別可能な文字列 |
-| **タイムアウト** | 10秒 | 適切なリクエスト制限 |
+| **タイムアウト** | 15秒 | 適切なリクエスト制限 |
 | **リトライ** | なし | 過度なアクセス防止 |
+
+### エラーレスポンス
+
+APIエラー時のレスポンス形式：
+
+```json
+{
+  "success": false,
+  "error": "Invalid Wikipedia URL",
+  "message": "URL must be from Wikipedia (*.wikipedia.org)",
+  "provided_url": "https://example.com/wiki/Test"
+}
+```
 
 ### ライセンス
 - 本プロジェクト: MIT License

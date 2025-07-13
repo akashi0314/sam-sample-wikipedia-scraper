@@ -93,8 +93,11 @@ def test_lambda_handler_valid_url(apigw_event_with_valid_url):
     assert ret["statusCode"] == 200
     assert data["success"] is True
     assert data["url"] == "https://ja.wikipedia.org/wiki/Amazon_Web_Services"
-    assert "robots_compliance" in data
-    assert "user_agent" in data
+    assert "title" in data
+    assert "toc" in data
+    assert "total_items" in data
+    assert isinstance(data["toc"], list)
+    assert isinstance(data["total_items"], int)
 
 
 def test_lambda_handler_invalid_url(apigw_event_with_invalid_url):
