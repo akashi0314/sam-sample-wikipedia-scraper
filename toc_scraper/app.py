@@ -550,7 +550,3 @@ def lambda_handler(event, context):
                 "message": str(e)
             }, ensure_ascii=False)
         }
-
-
-if __name__ == "__main__":
-    main()
