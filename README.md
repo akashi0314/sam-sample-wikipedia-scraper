@@ -84,12 +84,11 @@ curl "http://localhost:3000/toc?url=https://ja.wikipedia.org/wiki/Amazon_Web_Ser
 
 ```
 sam-sample-wikipedia-scraper/
-├── src/
-│   ├── toc_scraper/
-│   │   ├── app.py              # Lambda関数メイン処理
-│   │   └── wikipedia_toc.py    # 目次スクレイピング処理
+├── toc_scraper/
+│   ├── app.py              # Lambda関数メイン処理
+│   ├── wikipedia_toc.py    # 目次スクレイピング処理
 │   └── requirements.txt
-├── template.yaml              # SAMテンプレート
+├── template.yaml           # SAMテンプレート
 └── tests/
 ```
 
